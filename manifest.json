@@ -1,5 +1,5 @@
 {
-  "name": 벽돌 깨기",
+  "name": "벽돌 깨기",
   "short_name": "벽깨",
   "description": "벽돌 부수기 게임",
   "start_url": "/webgame/",
