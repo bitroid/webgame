@@ -2,69 +2,175 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>업그레이드 벽돌 부수기</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- PWA 메타 태그 -->
+    <meta name="theme-color" content="#222222">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <title>벽돌 깨기</title>
+    
     <style>
         body {
             margin: 0;
             padding: 0;
             background-color: #222;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             height: 100vh;
             color: white;
             font-family: sans-serif;
-            flex-direction: column;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
         }
+        
+        .game-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 400px;
+        }
+
         canvas {
             background-color: #111;
             border: 2px solid #555;
-            box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+            width: 100%;
+            max-width: 360px;
+            aspect-ratio: 360 / 650; 
         }
+
+        /* 하단 컨트롤러 영역 (좌, 중앙, 우 배치) */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            max-width: 360px;
+            margin-top: 15px;
+            padding: 0 10px;
+            box-sizing: border-box;
+        }
+
+        /* 좌우 버튼 크기 키움 */
+        .btn-dir {
+            width: 80px;
+            height: 80px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 32px;
+            flex-shrink: 0;
+        }
+
+        /* 중앙 발사/시작 버튼 영역 */
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex-grow: 1;
+            align-items: center;
+            padding: 0 10px;
+        }
+        
+        button {
+            background-color: #444;
+            color: white;
+            border: 2px solid #666;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            outline: none;
+            user-select: none;
+            touch-action: manipulation;
+        }
+        button:active {
+            background-color: #666;
+            border-color: #999;
+        }
+
+        .btn-action {
+            width: 100%;
+            max-width: 130px;
+            height: 45px;
+            background-color: #0095DD;
+            border-color: #007bb5;
+        }
+        .btn-action.start {
+            background-color: #ff4757;
+            border-color: #ff2a3d;
+        }
+
         .instructions {
             margin-top: 15px;
             text-align: center;
-            line-height: 1.5;
+            line-height: 1.4;
             color: #ddd;
-            font-size: 14px;
+            font-size: 13px;
+            padding: 0 10px;
         }
         .highlight { color: #ffeb3b; font-weight: bold; }
         .danger { color: #ff4757; font-weight: bold; }
-        .portal { color: #9c88ff; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
-    <div class="instructions">
-        <strong>[조작 방법]</strong> 이동: 방향키 | 발사: 스페이스 | 확장: Ctrl 유지 | 재시작: F5<br>
-        <strong>[점수 규칙]</strong> 기준선 위: <span class="highlight">+20점</span> | 기준선 아래: <span class="danger">-5점</span> | 기본: +10점<br>
-        <span class="highlight">※ 연속 파괴 시 콤보(Combo) 보너스가 무한정 합산됩니다!</span><br>
-        <span class="danger">※ 경고: 10초마다 벽돌이 내려오며, 벽돌이 바(Paddle)에 닿으면 즉시 게임 오버됩니다!</span>
+    <div class="game-wrapper">
+        <canvas id="gameCanvas" width="360" height="650"></canvas>
+        
+        <!-- 컨트롤 UI -->
+        <div class="controls">
+            <!-- 좌측 끝 -->
+            <button class="btn-dir" id="btn-left">◀</button>
+            
+            <!-- 가로 중앙 -->
+            <div class="actions">
+                <button class="btn-action" id="btn-fire">발사 (Space)</button>
+                <button class="btn-action start" id="btn-start">시작/재시작</button>
+            </div>
+            
+            <!-- 우측 끝 -->
+            <button class="btn-dir" id="btn-right">▶</button>
+        </div>
+
+        <div class="instructions">
+            <strong>[점수]</strong> 기본: +10 | <span class="highlight">연속 파괴 시 콤보 보너스!</span><br>
+            <span class="danger">※ 10초마다 벽돌 하강, 바닥에 닿으면 게임 오버!</span>
+        </div>
     </div>
 
 <script>
+// --- PWA 서비스 워커 등록 ---
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+            .then(reg => console.log('Service Worker 등록 완료:', reg.scope))
+            .catch(err => console.log('Service Worker 등록 실패:', err));
+    });
+}
+
+// 게임 로직 시작
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-// --- 웹 오디오 API (효과음) ---
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 function playBrickBreakSound() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
     const osc = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
-
     osc.type = 'square';
     osc.frequency.setValueAtTime(300, audioCtx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); 
-
     gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime); 
     gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-
     osc.connect(gainNode);
     gainNode.connect(audioCtx.destination);
-
     osc.start();
     osc.stop(audioCtx.currentTime + 0.1);
 }
@@ -73,237 +179,179 @@ function playTeleportSound() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
     const osc = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
-
     osc.type = 'sine';
     osc.frequency.setValueAtTime(800, audioCtx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(1500, audioCtx.currentTime + 0.1); 
-
     gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime); 
     gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-
     osc.connect(gainNode);
     gainNode.connect(audioCtx.destination);
-
     osc.start();
     osc.stop(audioCtx.currentTime + 0.1);
 }
 
-// 게임 상태 변수
 let score = 0;
 let bricksDestroyed = 0;
 let lastMilestone = 0;
-let isGameOver = false;
+let isGameOver = true;
 
-// 콤보 시스템 변수
 let combo = 0;
 let comboTimer = 0;
-const COMBO_DURATION = 180; // 3초 (60fps 기준)
+const COMBO_DURATION = 180;
 
-// 벽돌 생성 타이머 (10초마다 하강)
 let brickDropTimer = 0;
-const BRICK_DROP_INTERVAL = 600; // 10초 (60fps 기준)
+const BRICK_DROP_INTERVAL = 600;
 
 const MAX_BALLS = 30;
 const BASE_SPEED = 2.5; 
 const SPEED_INCREMENT = 0.08; 
-const DEFAULT_PADDLE_Y = canvas.height - 50;
+const PADDLE_Y = canvas.height - 40; 
 
-// 키보드 입력 상태 
-const keys = {
-    ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, Space: false, Ctrl: false
-};
+const keys = { ArrowLeft: false, ArrowRight: false };
 
-// 바(Paddle) 객체 설정 
 const paddle = {
-    width: 130, 
-    height: 15,
-    x: canvas.width / 2 - 65, 
-    y: DEFAULT_PADDLE_Y,
-    speed: 4, dx: 0, dy: 0,
-    isExpanded: false 
+    width: 70, height: 12,
+    x: canvas.width / 2 - 35, y: PADDLE_Y,
+    speed: 4.5, dx: 0, dy: 0
 };
 
-// 배열들
 let balls = [];
 let bricks = [];
 let particles = [];      
 let floatingTexts = [];  
 
-// 포탈(구멍) 설정
 const holes = [
-    { x: 0, y: 150, radius: 25, side: 'left' },
-    { x: 0, y: 320, radius: 25, side: 'left' },
-    { x: 0, y: 490, radius: 25, side: 'left' },
-    { x: canvas.width, y: 200, radius: 25, side: 'right' },
-    { x: canvas.width, y: 380, radius: 25, side: 'right' },
-    { x: canvas.width, y: 450, radius: 25, side: 'right' }
+    { x: 0, y: 180, radius: 20, side: 'left' },
+    { x: 0, y: 330, radius: 20, side: 'left' },
+    { x: 0, y: 480, radius: 20, side: 'left' },
+    { x: canvas.width, y: 220, radius: 20, side: 'right' },
+    { x: canvas.width, y: 380, radius: 20, side: 'right' },
+    { x: canvas.width, y: 530, radius: 20, side: 'right' }
 ];
 
-// 벽돌 설정
-const brickColumnCount = 10;
-const brickWidth = 65;
-const brickHeight = 25;
-const brickPadding = 10;
+const brickColumnCount = 6;
+const brickWidth = 45;
+const brickHeight = 20;
+const brickPadding = 8;
 const brickOffsetTop = 50;
-const brickOffsetLeft = 35;
+const brickOffsetLeft = 25;
 
-// 게임 초기화
 function initGame() {
-    score = 0;
-    bricksDestroyed = 0;
-    lastMilestone = 0;
-    isGameOver = false;
-    combo = 0;
-    comboTimer = 0;
-    brickDropTimer = BRICK_DROP_INTERVAL;
+    score = 0; bricksDestroyed = 0; lastMilestone = 0; isGameOver = false;
+    combo = 0; comboTimer = 0; brickDropTimer = BRICK_DROP_INTERVAL;
+    balls = []; particles = []; floatingTexts = [];
+    paddle.x = canvas.width / 2 - paddle.width / 2;
     
-    balls = [];
-    particles = [];
-    floatingTexts = [];
-    paddle.isExpanded = false;
-    
-    // 초기 벽돌 생성 (4줄)
     bricks = [];
     for (let r = 0; r < 4; r++) {
         let rowColor = `hsl(${Math.random() * 360}, 80%, 60%)`;
         for (let c = 0; c < brickColumnCount; c++) {
-            bricks.push({
-                c: c, r: r, status: 1, color: rowColor, x: 0, y: 0
-            });
+            bricks.push({ c: c, r: r, status: 1, color: rowColor, x: 0, y: 0 });
         }
     }
     addAttachedBall();
 }
 
-function getCurrentTargetSpeed() {
-    return BASE_SPEED + (bricksDestroyed * SPEED_INCREMENT);
-}
+function getCurrentTargetSpeed() { return BASE_SPEED + (bricksDestroyed * SPEED_INCREMENT); }
 
 function addAttachedBall() {
     balls.push({
-        x: paddle.x + paddle.width / 2,
-        y: paddle.y - 10,
-        radius: 8,
-        dx: 0, dy: 0,
-        attached: true,
-        cooldown: 0,
-        teleportCooldown: 0 
+        x: paddle.x + paddle.width / 2, y: paddle.y - 10, radius: 6,
+        dx: 0, dy: 0, attached: true, cooldown: 0, teleportCooldown: 0 
     });
 }
 
-// 효과 유틸리티 함수들
 function createParticles(x, y, color) {
     for (let i = 0; i < 15; i++) {
         particles.push({
-            x: x, y: y,
-            dx: (Math.random() - 0.5) * 6,
-            dy: (Math.random() - 0.5) * 6,
-            radius: Math.random() * 3 + 1,
-            life: 30, 
-            color: color
+            x: x, y: y, dx: (Math.random() - 0.5) * 6, dy: (Math.random() - 0.5) * 6,
+            radius: Math.random() * 3 + 1, life: 30, color: color
         });
     }
 }
 
 function createFloatingText(x, y, text, color) {
-    floatingTexts.push({
-        x: x, y: y,
-        text: text,
-        color: color,
-        life: 50, // 텍스트 유지 시간 
-        maxLife: 50,
-        size: 15    
-    });
+    floatingTexts.push({ x: x, y: y, text: text, color: color, life: 50, maxLife: 50, size: 12 });
 }
 
-// 공 텔레포트 로직
 function teleportBall(ball, entryHole) {
     let availableHoles = holes.filter(h => h !== entryHole);
     let exitHole = availableHoles[Math.floor(Math.random() * availableHoles.length)];
-    
     ball.y = exitHole.y;
-    
     let speed = getCurrentTargetSpeed();
     let angle = (Math.random() * (Math.PI * 2 / 3)) - (Math.PI / 3);
     
     if (exitHole.side === 'left') {
         ball.x = exitHole.radius + ball.radius + 3;
-        ball.dx = Math.cos(angle) * speed; 
-        ball.dy = Math.sin(angle) * speed; 
+        ball.dx = Math.cos(angle) * speed; ball.dy = Math.sin(angle) * speed; 
     } else {
         ball.x = canvas.width - exitHole.radius - ball.radius - 3;
-        ball.dx = -Math.cos(angle) * speed; 
-        ball.dy = Math.sin(angle) * speed; 
+        ball.dx = -Math.cos(angle) * speed; ball.dy = Math.sin(angle) * speed; 
     }
-    
     ball.teleportCooldown = 15; 
-    
     playTeleportSound();
     createParticles(entryHole.x, entryHole.y, "#9c88ff");
     createParticles(exitHole.x, exitHole.y, "#9c88ff");
 }
 
-// 키보드 이벤트
+function bindButtonEvent(btnId, keyName) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    const press = (e) => { e.preventDefault(); keys[keyName] = true; };
+    const release = (e) => { e.preventDefault(); keys[keyName] = false; };
+    btn.addEventListener("touchstart", press, { passive: false });
+    btn.addEventListener("touchend", release, { passive: false });
+    btn.addEventListener("mousedown", press);
+    btn.addEventListener("mouseup", release);
+    btn.addEventListener("mouseleave", release);
+}
+
+bindButtonEvent("btn-left", "ArrowLeft");
+bindButtonEvent("btn-right", "ArrowRight");
+
+const btnFire = document.getElementById("btn-fire");
+const fireAction = (e) => {
+    e.preventDefault();
+    if(audioCtx.state === 'suspended') audioCtx.resume(); 
+    let currentSpeed = getCurrentTargetSpeed();
+    balls.forEach(ball => {
+        if (ball.attached) {
+            ball.attached = false;
+            let angle = Math.random() * (Math.PI / 2) + (Math.PI / 4); 
+            ball.dx = Math.cos(angle) * currentSpeed * (Math.random() > 0.5 ? 1 : -1);
+            ball.dy = -currentSpeed;
+        }
+    });
+};
+btnFire.addEventListener("touchstart", fireAction, { passive: false });
+btnFire.addEventListener("mousedown", fireAction);
+
+const btnStart = document.getElementById("btn-start");
+const startAction = (e) => {
+    e.preventDefault();
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    initGame();
+};
+btnStart.addEventListener("touchstart", startAction, { passive: false });
+btnStart.addEventListener("mousedown", startAction);
+
 document.addEventListener("keydown", (e) => {
     if (e.code === "ArrowRight") keys.ArrowRight = true;
     if (e.code === "ArrowLeft") keys.ArrowLeft = true;
-    if (e.code === "ArrowUp") keys.ArrowUp = true;
-    if (e.code === "ArrowDown") keys.ArrowDown = true;
-    if (e.key === "Control") { 
-        keys.Ctrl = true; 
-        e.preventDefault(); 
-    }
-    if (e.code === "Space") {
-        if(audioCtx.state === 'suspended') audioCtx.resume(); 
-        let currentSpeed = getCurrentTargetSpeed();
-        balls.forEach(ball => {
-            if (ball.attached) {
-                ball.attached = false;
-                let angle = Math.random() * (Math.PI / 2) + (Math.PI / 4); 
-                ball.dx = Math.cos(angle) * currentSpeed * (Math.random() > 0.5 ? 1 : -1);
-                ball.dy = -currentSpeed;
-            }
-        });
-        e.preventDefault();
-    }
+    if (e.code === "Space") fireAction(e);
 });
 document.addEventListener("keyup", (e) => {
     if (e.code === "ArrowRight") keys.ArrowRight = false;
     if (e.code === "ArrowLeft") keys.ArrowLeft = false;
-    if (e.code === "ArrowUp") keys.ArrowUp = false;
-    if (e.code === "ArrowDown") keys.ArrowDown = false;
-    if (e.key === "Control") { 
-        keys.Ctrl = false; 
-        e.preventDefault(); 
-    }
 });
-
-// 그리기 함수들
-function drawBaseline() {
-    ctx.beginPath();
-    ctx.setLineDash([5, 5]);
-    ctx.moveTo(0, DEFAULT_PADDLE_Y);
-    ctx.lineTo(canvas.width, DEFAULT_PADDLE_Y);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.closePath();
-}
 
 function drawHoles() {
     holes.forEach(hole => {
         ctx.beginPath();
-        if (hole.side === 'left') {
-            ctx.arc(hole.x, hole.y, hole.radius, -Math.PI / 2, Math.PI / 2);
-        } else {
-            ctx.arc(hole.x, hole.y, hole.radius, Math.PI / 2, Math.PI * 1.5);
-        }
-        ctx.fillStyle = "#2c2c54"; 
-        ctx.fill();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "#9c88ff"; 
-        ctx.stroke();
-        ctx.closePath();
+        if (hole.side === 'left') ctx.arc(hole.x, hole.y, hole.radius, -Math.PI / 2, Math.PI / 2);
+        else ctx.arc(hole.x, hole.y, hole.radius, Math.PI / 2, Math.PI * 1.5);
+        ctx.fillStyle = "#2c2c54"; ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = "#9c88ff"; ctx.stroke(); ctx.closePath();
     });
     ctx.lineWidth = 1; 
 }
@@ -311,22 +359,15 @@ function drawHoles() {
 function drawPaddle() {
     ctx.beginPath();
     ctx.rect(paddle.x, paddle.y, paddle.width, paddle.height);
-    if (paddle.y < DEFAULT_PADDLE_Y) ctx.fillStyle = "#ffeb3b"; 
-    else if (paddle.y > DEFAULT_PADDLE_Y) ctx.fillStyle = "#ff4757"; 
-    else ctx.fillStyle = "#0095DD"; 
-    ctx.fill();
-    ctx.closePath();
+    ctx.fillStyle = "#0095DD"; ctx.fill(); ctx.closePath();
 }
 
 function drawBalls() {
     balls.forEach(ball => {
         ctx.beginPath();
         ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-        ctx.fillStyle = ball.attached ? "#FFD700" : "#ffffff";
-        ctx.fill();
-        ctx.strokeStyle = "#999";
-        ctx.stroke();
-        ctx.closePath();
+        ctx.fillStyle = ball.attached ? "#FFD700" : "#ffffff"; ctx.fill();
+        ctx.strokeStyle = "#999"; ctx.stroke(); ctx.closePath();
     });
 }
 
@@ -335,9 +376,7 @@ function drawBricks() {
         if (b.status === 1) {
             ctx.beginPath();
             ctx.rect(b.x, b.y, brickWidth, brickHeight);
-            ctx.fillStyle = b.color;
-            ctx.fill();
-            ctx.closePath();
+            ctx.fillStyle = b.color; ctx.fill(); ctx.closePath();
         }
     });
 }
@@ -345,16 +384,10 @@ function drawBricks() {
 function drawParticles() {
     for (let i = particles.length - 1; i >= 0; i--) {
         let p = particles[i];
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = p.life / 30;
-        ctx.fill();
-        ctx.closePath();
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fillStyle = p.color; ctx.globalAlpha = p.life / 30; ctx.fill(); ctx.closePath();
         ctx.globalAlpha = 1.0; 
-        p.x += p.dx;
-        p.y += p.dy;
-        p.life--;
+        p.x += p.dx; p.y += p.dy; p.life--;
         if (p.life <= 0) particles.splice(i, 1);
     }
 }
@@ -362,128 +395,74 @@ function drawParticles() {
 function drawFloatingTexts() {
     for (let i = floatingTexts.length - 1; i >= 0; i--) {
         let ft = floatingTexts[i];
-        ctx.font = `bold ${ft.size}px Arial`;
-        ctx.textAlign = "center";
-        ctx.fillStyle = ft.color;
-        ctx.globalAlpha = ft.life / ft.maxLife;
-        ctx.fillText(ft.text, ft.x, ft.y);
-        ctx.globalAlpha = 1.0;
-        ft.y -= 0.8; 
-        ft.size += 0.3; 
-        ft.life--;
+        ctx.font = `bold ${ft.size}px Arial`; ctx.textAlign = "center";
+        ctx.fillStyle = ft.color; ctx.globalAlpha = ft.life / ft.maxLife;
+        ctx.fillText(ft.text, ft.x, ft.y); ctx.globalAlpha = 1.0;
+        ft.y -= 0.8; ft.size += 0.2; ft.life--;
         if (ft.life <= 0) floatingTexts.splice(i, 1);
     }
 }
 
 function drawScoreAndCombo() {
-    ctx.font = "16px Arial";
-    ctx.fillStyle = "#fff";
-    ctx.textAlign = "left";
-    ctx.fillText("Score: " + score, 8, 20);
-    ctx.fillText("Balls: " + balls.length, 120, 20);
+    ctx.font = "14px Arial"; ctx.fillStyle = "#fff"; ctx.textAlign = "left";
+    ctx.fillText("Score: " + score, 8, 20); ctx.fillText("Balls: " + balls.length, 120, 20);
     
-    // 콤보 표시
     if (combo > 1) {
-        ctx.font = "bold 18px Arial";
-        ctx.fillStyle = "#ffeb3b";
-        // 콤보 타이머에 따라 글씨가 깜빡이거나 투명해지는 효과
+        ctx.font = "bold 16px Arial"; ctx.fillStyle = "#ffeb3b";
         ctx.globalAlpha = comboTimer / COMBO_DURATION;
-        ctx.fillText(`🔥 ${combo} COMBO!`, 220, 22);
-        ctx.globalAlpha = 1.0;
+        ctx.fillText(`🔥 ${combo} COMBO!`, 200, 22); ctx.globalAlpha = 1.0;
     }
 }
 
 function drawGameState() {
     if (isGameOver) {
-        ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.textAlign = "center";
-        
-        ctx.font = "bold 50px Arial";
-        ctx.fillStyle = "#ff4757";
+        ctx.font = "bold 35px Arial"; ctx.fillStyle = "#ff4757";
         ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 20);
-
-        ctx.font = "20px Arial";
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText("최종 점수: " + score, canvas.width / 2, canvas.height / 2 + 30);
-        ctx.fillText("생존 및 부순 벽돌: " + bricksDestroyed + "개", canvas.width / 2, canvas.height / 2 + 60);
-        ctx.fillText("Press F5 to Restart", canvas.width / 2, canvas.height / 2 + 100);
+        ctx.font = "16px Arial"; ctx.fillStyle = "#ffffff";
+        ctx.fillText("최종 점수: " + score, canvas.width / 2, canvas.height / 2 + 20);
+        ctx.fillText("부순 벽돌: " + bricksDestroyed + "개", canvas.width / 2, canvas.height / 2 + 50);
+        ctx.font = "bold 14px Arial"; ctx.fillStyle = "#ffeb3b";
+        ctx.fillText("시작 버튼을 눌러주세요", canvas.width / 2, canvas.height / 2 + 100);
     }
 }
 
-// 충돌 및 물리 업데이트
 function update() {
     if (isGameOver) return; 
 
     let targetSpeed = getCurrentTargetSpeed();
 
-    // 콤보 타이머 감소
     if (comboTimer > 0) {
         comboTimer--;
-        if (comboTimer <= 0) combo = 0; // 콤보 초기화
+        if (comboTimer <= 0) combo = 0; 
     }
 
-    // 시간 경과에 따른 벽돌 하강 로직 (10초마다)
     brickDropTimer--;
     if (brickDropTimer <= 0) {
         brickDropTimer = BRICK_DROP_INTERVAL;
-        
-        // 기존 벽돌 아래로 한칸 이동
         bricks.forEach(b => b.r++);
-        
-        // 맨 위에 새로운 줄 추가
         let newRowColor = `hsl(${Math.floor(Math.random() * 360)}, 80%, 60%)`;
         for (let c = 0; c < brickColumnCount; c++) {
-            bricks.push({
-                c: c, r: 0, status: 1, color: newRowColor, x: 0, y: 0
-            });
+            bricks.push({ c: c, r: 0, status: 1, color: newRowColor, x: 0, y: 0 });
         }
     }
 
-    // Ctrl 키 입력 및 패널티
-    let targetWidth = keys.Ctrl ? 200 : 130;
-    if (keys.Ctrl && !paddle.isExpanded) {
-        paddle.isExpanded = true;
-        score -= 10;
-        if (score < 0) score = 0;
-        createFloatingText(paddle.x + paddle.width / 2, paddle.y, "-10", "#ff4757");
-    } else if (!keys.Ctrl && paddle.isExpanded) {
-        paddle.isExpanded = false;
-    }
-    if (paddle.width !== targetWidth) {
-        paddle.x -= (targetWidth - paddle.width) / 2;
-        paddle.width = targetWidth;
-        if (paddle.x < 0) paddle.x = 0;
-        if (paddle.x + paddle.width > canvas.width) paddle.x = canvas.width - paddle.width;
-    }
-
-    // 1. 바 이동
     if (keys.ArrowRight && paddle.x < canvas.width - paddle.width) paddle.x += paddle.speed;
     if (keys.ArrowLeft && paddle.x > 0) paddle.x -= paddle.speed;
-    if (keys.ArrowUp && paddle.y > canvas.height * 0.5) paddle.y -= paddle.speed;
-    if (keys.ArrowDown && paddle.y < canvas.height - paddle.height) paddle.y += paddle.speed;
 
-    // 2. 벽돌 좌표 업데이트 및 게임오버 검사
     for (let i = 0; i < bricks.length; i++) {
         let b = bricks[i];
         if (b.status === 1) {
             b.x = (b.c * (brickWidth + brickPadding)) + brickOffsetLeft;
             b.y = (b.r * (brickHeight + brickPadding)) + brickOffsetTop;
 
-            // [게임 오버] 벽돌이 바(Paddle)와 충돌(겹침)하거나 화면 아래로 넘어가면 패배!
-            if (b.x < paddle.x + paddle.width &&
-                b.x + brickWidth > paddle.x &&
-                b.y < paddle.y + paddle.height &&
-                b.y + brickHeight > paddle.y) {
-                isGameOver = true;
-            }
-            if (b.y + brickHeight >= canvas.height) {
-                isGameOver = true;
-            }
+            if (b.x < paddle.x + paddle.width && b.x + brickWidth > paddle.x &&
+                b.y < paddle.y + paddle.height && b.y + brickHeight > paddle.y) isGameOver = true;
+            if (b.y + brickHeight >= canvas.height) isGameOver = true;
         }
     }
 
-    // 3. 공 업데이트
     for (let i = balls.length - 1; i >= 0; i--) {
         let ball = balls[i];
 
@@ -491,9 +470,7 @@ function update() {
         if (ball.teleportCooldown > 0) ball.teleportCooldown--;
 
         if (ball.attached) {
-            ball.x = paddle.x + paddle.width / 2;
-            ball.y = paddle.y - ball.radius;
-            continue;
+            ball.x = paddle.x + paddle.width / 2; ball.y = paddle.y - ball.radius; continue;
         }
 
         let currentVelocity = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
@@ -502,136 +479,74 @@ function update() {
             ball.dy = (ball.dy / currentVelocity) * targetSpeed;
         }
 
-        let nextX = ball.x + ball.dx;
-        let nextY = ball.y + ball.dy;
-        let teleportedThisFrame = false;
+        let nextX = ball.x + ball.dx; let nextY = ball.y + ball.dy; let teleportedThisFrame = false;
 
-        // 벽 & 포탈 충돌
         if (nextX > canvas.width - ball.radius) {
             let entry = holes.find(h => h.side === 'right' && Math.abs(ball.y - h.y) < h.radius);
-            if (entry && ball.teleportCooldown === 0) {
-                teleportBall(ball, entry);
-                teleportedThisFrame = true;
-            } else {
-                ball.x = canvas.width - ball.radius;
-                ball.dx = -Math.abs(ball.dx); 
-            }
+            if (entry && ball.teleportCooldown === 0) { teleportBall(ball, entry); teleportedThisFrame = true; } 
+            else { ball.x = canvas.width - ball.radius; ball.dx = -Math.abs(ball.dx); }
         } else if (nextX < ball.radius) {
             let entry = holes.find(h => h.side === 'left' && Math.abs(ball.y - h.y) < h.radius);
-            if (entry && ball.teleportCooldown === 0) {
-                teleportBall(ball, entry);
-                teleportedThisFrame = true;
-            } else {
-                ball.x = ball.radius;
-                ball.dx = Math.abs(ball.dx); 
-            }
-        } else {
-            ball.x = nextX;
-        }
+            if (entry && ball.teleportCooldown === 0) { teleportBall(ball, entry); teleportedThisFrame = true; } 
+            else { ball.x = ball.radius; ball.dx = Math.abs(ball.dx); }
+        } else { ball.x = nextX; }
 
         if (!teleportedThisFrame) {
-            if (nextY < ball.radius) {
-                ball.y = ball.radius;
-                ball.dy = Math.abs(ball.dy); 
-            } else if (nextY > canvas.height + ball.radius) {
-                balls.splice(i, 1); 
-                continue;
-            } else {
-                ball.y = nextY;
-            }
+            if (nextY < ball.radius) { ball.y = ball.radius; ball.dy = Math.abs(ball.dy); } 
+            else if (nextY > canvas.height + ball.radius) { balls.splice(i, 1); continue; } 
+            else { ball.y = nextY; }
         }
 
-        // 바(Paddle) 충돌 감지
-        if (ball.dy > 0 && 
-            ball.x > paddle.x && ball.x < paddle.x + paddle.width &&
+        if (ball.dy > 0 && ball.x > paddle.x && ball.x < paddle.x + paddle.width &&
             ball.y + ball.radius > paddle.y && ball.y - ball.radius < paddle.y + paddle.height) {
-            
             ball.dy = -Math.abs(ball.dy);
             let hitPoint = ball.x - (paddle.x + paddle.width / 2);
-            ball.dx = hitPoint * 0.10; 
-            
+            ball.dx = hitPoint * 0.15; 
             let newVelocity = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
             ball.dx = (ball.dx / newVelocity) * targetSpeed;
             ball.dy = (ball.dy / newVelocity) * targetSpeed;
         }
 
-        // 벽돌 충돌 감지 (거꾸로 반복하여 안전하게 삭제처리)
         for (let k = bricks.length - 1; k >= 0; k--) {
             let b = bricks[k];
             if (b.status === 1) {
                 if (ball.x > b.x && ball.x < b.x + brickWidth && ball.y > b.y && ball.y < b.y + brickHeight) {
-                    ball.dy = -ball.dy;
-                    b.status = 0; // 파괴 처리
-                    bricksDestroyed++;
-                    
-                    // 콤보 적용 로직
-                    combo++;
-                    comboTimer = COMBO_DURATION; // 콤보 타이머 갱신 (3초)
-                    let comboBonus = (combo > 1) ? (combo - 1) * 5 : 0; // 2콤보부터 5점씩 추가
-
+                    ball.dy = -ball.dy; b.status = 0; bricksDestroyed++;
+                    combo++; comboTimer = COMBO_DURATION; 
+                    let comboBonus = (combo > 1) ? (combo - 1) * 5 : 0; 
                     playBrickBreakSound();
                     createParticles(b.x + brickWidth / 2, b.y + brickHeight / 2, b.color);
-                    
-                    let gainedScore = 0;
-                    let textColor = "#ffffff";
-                    let textStr = "";
-
-                    // 기본 점수 판정
-                    if (paddle.y < DEFAULT_PADDLE_Y) { gainedScore = 20; textColor = "#ffeb3b"; } 
-                    else if (paddle.y > DEFAULT_PADDLE_Y) { gainedScore = -5; textColor = "#ff4757"; } 
-                    else { gainedScore = 10; textColor = "#ffffff"; }
-
-                    // 감점이 아닐 때만 콤보 보너스 합산
-                    if (gainedScore > 0) {
-                        gainedScore += comboBonus;
-                        textStr = `+${gainedScore}`;
-                        if (combo > 1) textStr += ` (${combo} Combo!)`; // 텍스트에 콤보 표시
-                    } else {
-                        textStr = `${gainedScore}`;
-                    }
-
+                    let gainedScore = 10 + comboBonus;
+                    let textStr = `+${gainedScore}`;
+                    if (combo > 1) textStr += ` (${combo} Combo!)`; 
                     score += gainedScore;
-                    if (score < 0) score = 0; 
-                    
-                    createFloatingText(b.x + brickWidth / 2, b.y, textStr, textColor);
+                    createFloatingText(b.x + brickWidth / 2, b.y, textStr, "#ffffff");
 
-                    if (bricksDestroyed - lastMilestone >= 10) {
-                        lastMilestone += 10;
-                        addAttachedBall();
-                    }
+                    if (bricksDestroyed - lastMilestone >= 10) { lastMilestone += 10; addAttachedBall(); }
                 }
             }
         }
     }
 
-    // 파괴된 벽돌 배열에서 정리
     bricks = bricks.filter(b => b.status === 1);
 
-    // 4. 공과 공 충돌 감지
     for (let i = 0; i < balls.length; i++) {
         for (let j = i + 1; j < balls.length; j++) {
-            let b1 = balls[i];
-            let b2 = balls[j];
-
+            let b1 = balls[i]; let b2 = balls[j];
             if (b1.attached || b2.attached) continue;
-
-            let dx = b1.x - b2.x;
-            let dy = b1.y - b2.y;
+            let dx = b1.x - b2.x; let dy = b1.y - b2.y;
             let distance = Math.sqrt(dx * dx + dy * dy);
 
             if (distance < b1.radius + b2.radius) {
                 let tempDx = b1.dx; let tempDy = b1.dy;
-                b1.dx = b2.dx; b1.dy = b2.dy;
-                b2.dx = tempDx; b2.dy = tempDy;
-
+                b1.dx = b2.dx; b1.dy = b2.dy; b2.dx = tempDx; b2.dy = tempDy;
                 let overlap = (b1.radius + b2.radius) - distance;
-                b1.x += (dx / distance) * overlap;
-                b1.y += (dy / distance) * overlap;
+                b1.x += (dx / distance) * overlap; b1.y += (dy / distance) * overlap;
 
                 if (b1.cooldown === 0 && b2.cooldown === 0 && balls.length < MAX_BALLS) {
                     b1.cooldown = 30; b2.cooldown = 30;
                     balls.push({
-                        x: (b1.x + b2.x) / 2, y: (b1.y + b2.y) / 2, radius: 8,
+                        x: (b1.x + b2.x) / 2, y: (b1.y + b2.y) / 2, radius: 6,
                         dx: (Math.random() - 0.5) * targetSpeed, dy: (Math.random() - 0.5) * targetSpeed,
                         attached: false, cooldown: 60, teleportCooldown: 0
                     });
@@ -640,32 +555,18 @@ function update() {
         }
     }
 
-    if (balls.length === 0 && !isGameOver) {
-        isGameOver = true;
-    }
+    if (balls.length === 0 && !isGameOver) isGameOver = true;
 }
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    drawHoles();          
-    drawBaseline(); 
-    drawBricks();
-    drawParticles();      
-    drawFloatingTexts();  
-    drawPaddle();
-    drawBalls();
-    drawScoreAndCombo();
-    drawGameState();
-    
+    drawHoles(); drawBricks(); drawParticles(); drawFloatingTexts();  
+    drawPaddle(); drawBalls(); drawScoreAndCombo(); drawGameState();
     update();
-    
     requestAnimationFrame(draw);
 }
 
-initGame();
 draw();
-
 </script>
 </body>
 </html>
